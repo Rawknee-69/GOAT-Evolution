@@ -6,6 +6,7 @@ from typing import Any
 
 from backend.core.event_bus import event_bus
 from backend.core.judge import DeterministicJudge
+from backend.training.logging_setup import log_event
 from backend.core.models import (
     ConversationTurn,
     GOATAction,
@@ -27,8 +28,8 @@ except Exception:
 class GoatEnvironment(Environment):
     SUPPORTS_CONCURRENT_SESSIONS = True
 
-    def __init__(self) -> None:
-        self.simulator = TargetModelSimulator()
+    def __init__(self, target_subject: Any = None) -> None:
+        self.simulator = target_subject if target_subject is not None else TargetModelSimulator()
         self.judge = DeterministicJudge()
         self.reset()
 
@@ -47,10 +48,33 @@ class GoatEnvironment(Environment):
         self._blue_reward = 0.0
         self._action_history: list[dict] = []
         event_bus.emit("battle_started", session_id=self._episode_id, task_id=task_id)
+        log_event(
+            "goat.env",
+            "reset",
+            episode_id=self._episode_id,
+            task_id=task_id,
+            model_profile=model_profile,
+            max_turns=self._max_turns,
+            seed=seed,
+        )
         return self._build_observation("red")
 
     def step(self, action: GOATAction) -> tuple[GOATObservation, float, bool, dict]:
+        log_event(
+            "goat.env",
+            "step_in",
+            episode_id=self._episode_id,
+            role=action.role,
+            turn_number=self._turn_number,
+        )
         if self._done:
+            log_event(
+                "goat.env",
+                "step_skipped_done",
+                episode_id=self._episode_id,
+                role=action.role,
+                reason=self._done_reason,
+            )
             return self._build_observation(action.role), 0.0, True, {"reason": self._done_reason}
 
         reward = 0.0
@@ -107,6 +131,18 @@ class GoatEnvironment(Environment):
                 self._done = True
                 self._done_reason = "max_turns_blue_wins"
 
+        log_event(
+            "goat.env",
+            "step_out",
+            episode_id=self._episode_id,
+            role=action.role,
+            reward=float(reward),
+            done=bool(self._done),
+            done_reason=self._done_reason,
+            turn_number=self._turn_number,
+            last_violation=float(self._history[-1]["violation_score"]) if self._history else 0.0,
+            blue_prevented=bool(self._history[-1].get("blue_prevented", False)) if self._history else False,
+        )
         return self._build_observation(action.role), reward, self._done, {"episode_id": self._episode_id, "turn": self._turn_number}
 
     @property
@@ -155,3 +191,7 @@ class GoatEnvironment(Environment):
             blue_pattern_correct=False,
             over_refusal_count=0,
         )
+
+    def episode_trace(self) -> list[dict[str, Any]]:
+        """Expose the current episode trace for online training loops."""
+        return [dict(turn) for turn in self._history]

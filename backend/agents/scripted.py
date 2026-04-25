@@ -9,6 +9,7 @@ from backend.core.models import (
     GOATObservation,
     RedAction,
 )
+from backend.training.logging_setup import log_event
 
 
 class ScriptedRedAgent:
@@ -23,6 +24,12 @@ class ScriptedRedAgent:
 
     async def act(self, observation: GOATObservation) -> RedAction:
         strategy = next(self._strategies)
+        log_event(
+            "goat.agents",
+            "scripted_red_action",
+            episode_id=observation.episode_id,
+            strategy=[c.value for c in strategy],
+        )
         return RedAction(
             operation="deploy_strategy",
             current_strategy=strategy,
@@ -37,6 +44,13 @@ class ScriptedBlueAgent:
         defense = [DefenseComponent.TOPIC_REDIRECT]
         if latest > 0.4:
             defense = [DefenseComponent.EARLY_INTERVENTION, DefenseComponent.PATTERN_FLAG]
+        log_event(
+            "goat.agents",
+            "scripted_blue_action",
+            episode_id=observation.episode_id,
+            defense=[c.value for c in defense],
+            last_violation=latest,
+        )
         return BlueAction(
             operation="deploy_defense",
             current_defense=defense,

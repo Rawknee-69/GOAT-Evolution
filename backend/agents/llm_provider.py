@@ -77,16 +77,38 @@ class OpenAIProvider(LLMProvider):
 
 
 class GeminiProvider(LLMProvider):
-    def __init__(self, model: str = "gemini-1.5-flash"):
+    def __init__(self, model: str = "gemini-2.5-flash"):
         super().__init__(model)
-        from google.generativeai import GenerativeModel
+        import google.generativeai as genai
 
-        self.model_client = GenerativeModel(model)
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY is required to use GeminiProvider")
+        genai.configure(api_key=api_key)
+        self.model_client = genai.GenerativeModel(
+            model,
+            generation_config={
+                "temperature": self.temperature,
+                "response_mime_type": "application/json",
+            },
+        )
 
     async def complete_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        prompt = f"{system_prompt}\n\n{user_prompt}\nRespond in JSON only."
+        prompt = f"{system_prompt}\n\n{user_prompt}\n\nRespond in JSON only."
         resp = await self.model_client.generate_content_async(prompt)
-        return json.loads(resp.text)
+        text = (resp.text or "").strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                return json.loads(text[start : end + 1])
+            raise
 
 
 class ScriptedProvider(LLMProvider):

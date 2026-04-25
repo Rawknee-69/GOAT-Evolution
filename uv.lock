@@ -1175,8 +1175,11 @@ dev = [
     { name = "textual" },
 ]
 training = [
+    { name = "accelerate" },
     { name = "datasets" },
     { name = "matplotlib" },
+    { name = "peft" },
+    { name = "torch" },
     { name = "transformers" },
     { name = "trl" },
     { name = "unsloth" },
@@ -1185,6 +1188,7 @@ training = [
 
 [package.metadata]
 requires-dist = [
+    { name = "accelerate", marker = "extra == 'training'", specifier = ">=0.34.0" },
     { name = "datasets", marker = "extra == 'training'", specifier = ">=2.20.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-generativeai", specifier = ">=0.8.3" },
@@ -1194,11 +1198,13 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "openai", specifier = ">=1.54.0" },
     { name = "openenv-core", specifier = ">=0.2.1" },
+    { name = "peft", marker = "extra == 'training'", specifier = ">=0.12.0" },
     { name = "pydantic", specifier = ">=2.9.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
     { name = "sse-starlette", specifier = ">=2.1.0" },
     { name = "textual", marker = "extra == 'dev'", specifier = ">=0.85.0" },
+    { name = "torch", marker = "extra == 'training'", specifier = ">=2.4.0" },
     { name = "transformers", marker = "extra == 'training'", specifier = ">=4.44.0" },
     { name = "trl", marker = "extra == 'training'", specifier = ">=0.8.0" },
     { name = "unsloth", marker = "extra == 'training'" },
