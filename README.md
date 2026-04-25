@@ -32,7 +32,7 @@ The CLI runs Python-first against the env classes and does **not** require the F
 ## Hackathon alignment
 
 - **Theme**: Self-improvement + multi-agent + long-horizon (red ↔ blue ↔ judge ↔ trainer).
-- **OpenEnv (latest)**: `GoatEnvironment` keeps the Gym-style `reset/step/state` contract; `openenv.yaml` declares the Space.
+- **OpenEnv (latest)**: Gym-style core env + OpenEnv HTTP adapter are both supported (`backend/server/goat_environment.py` + `backend/server/openenv_adapter.py`); `openenv.yaml` declares the Space.
 - **Training script**: `training/hf_online_finetune.py` (TRL `SFTTrainer` + PEFT/LoRA) + `training/trl_colab_finetune.ipynb` (Colab-runnable).
 - **Reward improvement evidence**: `training/baseline_vs_trained.py` writes `evidence/summary.json` and `evidence/reward_curve.png`.
 - **Hosting**: published to a Hugging Face Space; environment + manifest in this repo.
@@ -102,6 +102,34 @@ uv run python training/hf_online_finetune.py \
 
 Or run the Colab notebook: [`training/trl_colab_finetune.ipynb`](training/trl_colab_finetune.ipynb).
 
+Also included:
+
+- [`training/colab_training.ipynb`](training/colab_training.ipynb) — full end-to-end realtime loop notebook.
+- [`training/unsloth_finetune.ipynb`](training/unsloth_finetune.ipynb) — faster Unsloth LoRA path.
+- [`training/openenv_space_smoke.ipynb`](training/openenv_space_smoke.ipynb) — judge-friendly HTTP smoke test for a deployed HF Space.
+
+All notebooks can run in **scripted-agent fallback mode** by default (no `GEMINI_API_KEY` required). Set providers to `gemini` only when you want LLM Red/Blue/Judge behavior.
+
+## Deploy to Hugging Face Space
+
+1) Create a Docker Space (SDK: Docker), then set:
+
+- `HF_TOKEN` (secret)
+- Optional runtime keys: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `NVIDIA_API_KEY`
+
+2) Push this repo to your Space:
+
+```bash
+bash scripts/deploy_hf_space.sh <your-hf-username> <space-name>
+```
+
+3) After build, verify OpenEnv endpoints:
+
+```bash
+curl https://<your-hf-username>-<space-name>.hf.space/health
+curl https://<your-hf-username>-<space-name>.hf.space/metadata
+```
+
 ## Evidence pipeline
 
 After a training run:
@@ -124,7 +152,9 @@ Reads `reward_curve.csv` + `baseline_holdout.json` + `metrics.json`, writes:
 - `step(action) -> (GOATObservation, float, bool, dict)`
 - `state -> GOATState`
 
-The trainer injects an `LLMSubject` as the optional `target_subject` constructor arg. The HTTP server (`backend/server/app.py`) still uses the default `TargetModelSimulator` so `openenv.yaml` and the Space deployment are unchanged.
+The trainer injects an `LLMSubject` as the optional `target_subject` constructor arg.
+
+The HTTP server uses `backend/server/openenv_adapter.py`, which wraps the Gym-style env and returns OpenEnv-compliant observations (`reward`/`done` embedded in the observation response), so `/reset` and `/step` work correctly on Spaces with the latest OpenEnv server.
 
 ## Architecture
 

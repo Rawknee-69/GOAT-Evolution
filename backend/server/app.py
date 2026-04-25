@@ -13,13 +13,22 @@ try:
 except Exception:
     create_openenv_app = None
 
-from backend.core.openenv_types import GoatAction, GoatObservation
-from backend.server.goat_environment import GoatEnvironment
+from backend.server.openenv_adapter import (
+    GOATOpenEnvAction,
+    GOATOpenEnvEnvironment,
+    GOATOpenEnvObservation,
+)
 
 FRONTEND_DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 if create_openenv_app:
-    app: FastAPI = create_openenv_app(GoatEnvironment, GoatAction, GoatObservation, env_name="goat_evolution", max_concurrent_envs=8)
+    app: FastAPI = create_openenv_app(
+        GOATOpenEnvEnvironment,
+        GOATOpenEnvAction,
+        GOATOpenEnvObservation,
+        env_name="goat_evolution",
+        max_concurrent_envs=8,
+    )
 else:
     app = FastAPI(title="goat_evolution")
 

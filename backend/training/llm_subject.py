@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from backend.core.models import AttackComponent, DefenseComponent, ModelProfile
+from backend.core.models import AttackComponent, DefenseComponent, GuardLayer, ModelProfile
 from backend.core.target_simulator import (
     DEFENSE_MULTIPLIERS,
     TargetModelSimulator,
@@ -115,22 +115,43 @@ class LLMSubject:
         model_profile: ModelProfile,
         turn_number: int,
         max_turns: int,
-        active_defenses: list[DefenseComponent],
+        active_defenses: list[DefenseComponent] | None = None,
+        *,
+        active_input_defenses: list[DefenseComponent] | None = None,
+        active_output_defenses: list[DefenseComponent] | None = None,
+        target_layer: GuardLayer = GuardLayer.INPUT,
     ) -> dict[str, Any]:
         """Drop-in for ``TargetModelSimulator.respond``.
 
-        Returns the same dict shape so ``GoatEnvironment`` is unchanged.
+        Accepts BOTH the legacy single-bag ``active_defenses`` (used by the
+        ``HoldoutGate`` and older trainer paths) and the per-layer kwargs the
+        ``GoatEnvironment`` passes today. The single-bag list is treated as the
+        output-layer defenses. The trainable defense-policy proxy is layered on
+        top of the output-layer defenses.
         """
-        biased_defenses = self._apply_policy_to_defenses(active_defenses)
+        if active_input_defenses is None:
+            active_input_defenses = []
+        if active_output_defenses is None:
+            active_output_defenses = list(active_defenses) if active_defenses else []
+        biased_output_defenses = self._apply_policy_to_defenses(active_output_defenses)
         if self.backend == "hf_local":
             base = self._simulator.respond(
-                strategy, model_profile, turn_number, max_turns, biased_defenses
+                strategy,
+                model_profile,
+                turn_number,
+                max_turns,
+                active_input_defenses=active_input_defenses,
+                active_output_defenses=biased_output_defenses,
+                target_layer=target_layer,
             )
             self._ensure_hf_loaded()
-            generated = self._generate_hf(strategy, biased_defenses, turn_number, max_turns)
-            base["response_text"] = generated
+            if not base.get("input_blocked"):
+                generated = self._generate_hf(
+                    strategy, biased_output_defenses, turn_number, max_turns
+                )
+                base["response_text"] = generated
             base["backend"] = self.backend
-            base["decoded_defense_bias"] = self._defense_bias_dump(biased_defenses)
+            base["decoded_defense_bias"] = self._defense_bias_dump(biased_output_defenses)
             log_event(
                 "goat.subject",
                 "respond",
@@ -138,17 +159,25 @@ class LLMSubject:
                 model=self.model_name,
                 turn_number=turn_number,
                 strategy=[c.value for c in strategy],
-                biased_defenses=[c.value for c in biased_defenses],
+                input_defenses=[c.value for c in active_input_defenses],
+                output_defenses=[c.value for c in biased_output_defenses],
+                target_layer=target_layer.value,
                 violation_score=base.get("violation_score"),
                 response_preview=str(base.get("response_text", ""))[:160],
             )
             return base
 
         base = self._simulator.respond(
-            strategy, model_profile, turn_number, max_turns, biased_defenses
+            strategy,
+            model_profile,
+            turn_number,
+            max_turns,
+            active_input_defenses=active_input_defenses,
+            active_output_defenses=biased_output_defenses,
+            target_layer=target_layer,
         )
         base["backend"] = self.backend
-        base["decoded_defense_bias"] = self._defense_bias_dump(biased_defenses)
+        base["decoded_defense_bias"] = self._defense_bias_dump(biased_output_defenses)
         log_event(
             "goat.subject",
             "respond",
@@ -156,7 +185,9 @@ class LLMSubject:
             model=self.model_name,
             turn_number=turn_number,
             strategy=[c.value for c in strategy],
-            biased_defenses=[c.value for c in biased_defenses],
+            input_defenses=[c.value for c in active_input_defenses],
+            output_defenses=[c.value for c in biased_output_defenses],
+            target_layer=target_layer.value,
             violation_score=base.get("violation_score"),
             response_preview=str(base.get("response_text", ""))[:160],
         )
