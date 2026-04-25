@@ -229,7 +229,6 @@ Judge helper notebook:
 - [x] Minimal training path with TRL or Unsloth in Colab
 - [x] Reward improvement evidence artifacts
 - [ ] HF mini-blog URL added
-- [ ] <2 minute YouTube demo URL added
 - [ ] Final Space URL added
 
 ---
