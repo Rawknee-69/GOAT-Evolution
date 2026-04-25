@@ -4,110 +4,62 @@ import uuid
 
 from backend.core.event_bus import EventBus
 from backend.core.models import (
-    AttackComponent,
-    DefenseComponent,
     GOATAction,
     GOATObservation,
-    GOATState,
-    ConversationTurn,
-    ModelProfile,
 )
 from backend.core.registry import VulnerabilityRegistry
-from backend.core.reward import compute_rewards
-from backend.core.target_simulator import TargetModelSimulator
+from backend.server.goat_environment import GoatEnvironment
 
 
 class GOATEvolutionEnvironment:
+    """Session-oriented wrapper over the canonical GoatEnvironment.
+
+    This adapter keeps the legacy MCP-facing interface (`reset`, `step`, `state`
+    with explicit `session_id`) while delegating all battle logic to
+    `backend.server.goat_environment.GoatEnvironment`.
+    """
+
     def __init__(self, registry: VulnerabilityRegistry, event_bus: EventBus) -> None:
         self.registry = registry
         self.event_bus = event_bus
-        self.simulator = TargetModelSimulator()
-        self.sessions: dict[str, GOATState] = {}
+        self.sessions: dict[str, GoatEnvironment] = {}
 
-    async def reset(self, task_id: int = 4, max_turns: int = 8, session_id: str | None = None) -> GOATObservation:
+    async def reset(
+        self,
+        task_id: int = 4,
+        max_turns: int = 8,
+        session_id: str | None = None,
+    ) -> GOATObservation:
+        # `max_turns` is accepted for backward compatibility with older callers.
+        # Canonical max-turn behavior is controlled internally by GoatEnvironment
+        # from task_id/profile.
+        _ = max_turns
         sid = session_id or str(uuid.uuid4())
-        state = GOATState(session_id=sid, task_id=task_id, max_turns=max_turns)
-        self.sessions[sid] = state
-        await self.event_bus.publish(sid, {"type": "battle_started", "session_id": sid})
-        return self._obs(state)
+        env = GoatEnvironment()
+        self.sessions[sid] = env
+        obs = env.reset(task_id=task_id, episode_id=sid, model_profile="standard_model")
+        self.event_bus.emit("battle_started", session_id=sid, task_id=task_id)
+        return obs
 
     async def step(self, action: GOATAction, session_id: str) -> GOATObservation:
-        state = self.sessions[session_id]
-        if state.done:
-            return self._obs(state)
-
-        if action.role == "red" and action.red_payload:
-            attack = action.red_payload.strategy
-            defense = self._latest_defense(state)
-            await self.event_bus.publish(session_id, {"type": "red_deploys", "strategy": [a.value for a in attack]})
-        elif action.role == "blue" and action.blue_payload:
-            attack = self._latest_attack(state)
-            defense = action.blue_payload.defense
-            await self.event_bus.publish(session_id, {"type": "blue_deploys", "defense": [d.value for d in defense]})
-        else:
-            attack = self._latest_attack(state)
-            defense = self._latest_defense(state)
-
-        state.turn += 1
-        violation, response_type, response_text = self.simulator.respond(
-            attack_components=attack,
-            defense_components=defense,
-            profile=ModelProfile.STANDARD,
-            turn=state.turn,
-            max_turns=state.max_turns,
+        env = self._require_session(session_id)
+        obs, reward, done, info = env.step(action)
+        self.event_bus.emit(
+            "mcp_step",
+            session_id=session_id,
+            role=action.role,
+            reward=float(reward),
+            done=bool(done),
+            info=info,
         )
-        novelty = self.registry.compute_novelty_score(attack)
-        red_reward, blue_reward = compute_rewards(violation, novelty, state.turn, state.max_turns)
-        state.cumulative_red_reward += red_reward
-        state.cumulative_blue_reward += blue_reward
-        turn = ConversationTurn(
-            turn_index=state.turn,
-            red_strategy=attack,
-            blue_defense=defense,
-            target_response=response_text,
-            violation_score=violation,
-        )
-        state.history.append(turn)
-        await self.event_bus.publish(
-            session_id,
-            {"type": "target_responds", "response_type": response_type, "violation_score": violation, "text": response_text},
-        )
-
-        entry = self.registry.maybe_add_emergent(attack, "simulator")
-        if entry:
-            await self.event_bus.publish(session_id, {"type": "registry_entry_added", "attack_id": entry.attack_id})
-
-        if state.turn >= state.max_turns:
-            state.done = True
-            await self.event_bus.publish(
-                session_id,
-                {"type": "episode_ended", "red_reward": state.cumulative_red_reward, "blue_reward": state.cumulative_blue_reward},
-            )
-        return self._obs(state)
+        return obs
 
     def state(self, session_id: str) -> GOATObservation:
-        return self._obs(self.sessions[session_id])
+        env = self._require_session(session_id)
+        return env._build_observation("observer")  # type: ignore[attr-defined]
 
-    def _obs(self, state: GOATState) -> GOATObservation:
-        return GOATObservation(
-            session_id=state.session_id,
-            task_id=state.task_id,
-            turn=state.turn,
-            max_turns=state.max_turns,
-            history=state.history,
-            cumulative_red_reward=state.cumulative_red_reward,
-            cumulative_blue_reward=state.cumulative_blue_reward,
-            done=state.done,
-        )
-
-    @staticmethod
-    def _latest_attack(state: GOATState) -> list[AttackComponent]:
-        if not state.history:
-            return [AttackComponent.CRESCENDO, AttackComponent.DETAIL_ESCALATION]
-        return state.history[-1].red_strategy
-
-    @staticmethod
-    def _latest_defense(state: GOATState) -> list[DefenseComponent]:
-        if not state.history:
-            return [DefenseComponent.EARLY_INTERVENTION]
-        return state.history[-1].blue_defense
+    def _require_session(self, session_id: str) -> GoatEnvironment:
+        env = self.sessions.get(session_id)
+        if env is None:
+            raise KeyError(f"Unknown session_id: {session_id}")
+        return env

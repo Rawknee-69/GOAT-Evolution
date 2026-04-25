@@ -501,9 +501,9 @@ class RealtimeTrainer:
             )
         else:
             self.state_store.rollback_candidate(reason=decision.reason)
-            self.subject.load_checkpoint(parent_label) or self.subject.load_checkpoint(
-                self.state_store.state.last_good_label
-            )
+            restored = self.subject.load_checkpoint(parent_label)
+            if not restored:
+                self.subject.load_checkpoint(self.state_store.state.last_good_label)
             log_event(
                 "goat.trainer",
                 "candidate_rolled_back",

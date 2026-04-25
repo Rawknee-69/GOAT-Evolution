@@ -289,12 +289,57 @@ class LLMSubject:
         return target
 
     def load_checkpoint(self, label: str) -> bool:
-        candidate = self.adapter_dir.parent / label / "defense_policy.json"
-        if not candidate.exists():
+        ckpt_dir = self.adapter_dir.parent / label
+        policy_file = ckpt_dir / "defense_policy.json"
+        if not policy_file.exists():
             return False
-        self._policy = json.loads(candidate.read_text(encoding="utf-8"))
+        self._policy = json.loads(policy_file.read_text(encoding="utf-8"))
         self._save_policy()
+        if self.backend == "hf_local":
+            self._load_hf_adapter_checkpoint(ckpt_dir)
         return True
+
+    def _load_hf_adapter_checkpoint(self, ckpt_dir: Path) -> None:
+        """Reload LoRA weights from a saved checkpoint directory (rollback/promote)."""
+        adapter_cfg = ckpt_dir / "adapter_config.json"
+        if not adapter_cfg.exists():
+            self._hf_loaded = False
+            self._model = None
+            self._tokenizer = None
+            self._optimizer = None
+            return
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from peft import PeftModel
+
+            self._model = None
+            self._tokenizer = None
+            self._optimizer = None
+            self._hf_loaded = False
+
+            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=True)
+            if self._tokenizer.pad_token is None:
+                self._tokenizer.pad_token = self._tokenizer.eos_token
+            dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            base = AutoModelForCausalLM.from_pretrained(self.model_name, torch_dtype=dtype)
+            self._model = PeftModel.from_pretrained(base, str(ckpt_dir), is_trainable=True)
+            self._optimizer = torch.optim.AdamW(
+                [p for p in self._model.parameters() if p.requires_grad],
+                lr=self.learning_rate,
+            )
+            self._hf_loaded = True
+        except Exception as exc:
+            log_event(
+                "goat.subject",
+                "load_hf_adapter_checkpoint_error",
+                ckpt_dir=str(ckpt_dir),
+                error=str(exc),
+            )
+            self._hf_loaded = False
+            self._model = None
+            self._tokenizer = None
+            self._optimizer = None
 
     def _apply_policy_to_defenses(
         self, active_defenses: list[DefenseComponent]
@@ -420,6 +465,8 @@ class LLMSubject:
         import torch
 
         inputs = self._tokenizer(prompt, return_tensors="pt")
+        device = next(self._model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
         with torch.no_grad():
             output = self._model.generate(
                 **inputs,
@@ -436,6 +483,8 @@ class LLMSubject:
         chosen = sample.get("chosen_response", SAFE_REFUSAL_TEMPLATE)
         full = f"{prompt}\n{chosen}"
         encoded = self._tokenizer(full, return_tensors="pt", truncation=True, max_length=512)
+        device = next(self._model.parameters()).device
+        encoded = {k: v.to(device) for k, v in encoded.items()}
         labels = encoded["input_ids"].clone()
         outputs = self._model(**encoded, labels=labels)
         loss = outputs.loss

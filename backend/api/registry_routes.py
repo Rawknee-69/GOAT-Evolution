@@ -8,10 +8,10 @@ def build_registry_router(registry) -> APIRouter:
 
     @router.get("")
     async def all_entries() -> list[dict]:
-        return [entry.model_dump() for entry in registry.snapshot()]
+        return registry.get_all()
 
     @router.get("/emergent")
     async def emergent_entries() -> list[dict]:
-        return [entry.model_dump() for entry in registry.snapshot() if entry.attack_id.startswith("emergent_")]
+        return registry.get_emergent()
 
     return router

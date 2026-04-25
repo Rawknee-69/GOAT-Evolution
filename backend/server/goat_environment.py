@@ -19,14 +19,14 @@ from backend.core.reward import compute_rewards
 from backend.core.target_simulator import TargetModelSimulator
 from backend.training.logging_setup import log_event
 
+_OpenEnvEnvironmentBase: type[Any]
 try:
-    from openenv.core.env_server.interfaces import Environment
+    from openenv.core.env_server.interfaces import Environment as _OpenEnvEnvironmentBase
 except Exception:
-    class Environment:  # type: ignore[no-redef]
-        SUPPORTS_CONCURRENT_SESSIONS = True
+    _OpenEnvEnvironmentBase = object
 
 
-class GoatEnvironment(Environment):
+class GoatEnvironment(_OpenEnvEnvironmentBase):
     """Two-layer LLM safety environment.
 
     Each red turn drives the target model through two distinct guardrail layers:

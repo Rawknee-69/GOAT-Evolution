@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import os
 from abc import ABC, abstractmethod
@@ -35,9 +36,8 @@ class HuggingFaceProvider(LLMProvider):
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             temperature=self.temperature,
             max_tokens=600,
-            response_format={"type": "json_object"},
         )
-        return json.loads(resp.choices[0].message.content)
+        return json.loads(resp.choices[0].message.content or "{}")
 
 
 class NvidiaNimProvider(LLMProvider):
@@ -79,13 +79,13 @@ class OpenAIProvider(LLMProvider):
 class GeminiProvider(LLMProvider):
     def __init__(self, model: str = "gemini-2.5-flash"):
         super().__init__(model)
-        import google.generativeai as genai
-
+        # Import dynamically to avoid static-export issues in type stubs.
+        genai = importlib.import_module("google.generativeai")
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is required to use GeminiProvider")
         genai.configure(api_key=api_key)
-        self.model_client = genai.GenerativeModel(
+        self.model_client: Any = genai.GenerativeModel(
             model,
             generation_config={
                 "temperature": self.temperature,

@@ -16,185 +16,250 @@ license: mit
 
 # GOAT-Evolution ⚔️
 
-Per-attack co-evolution training environment for an LLM defender.
+GOAT-Evolution is an OpenEnv-compatible multi-agent safety training environment where:
 
-The defender LLM (Qwen2.5-3B-Instruct or Gemma-2-2b-it) is the **test subject**. After every red attack inside the OpenEnv-compatible `GoatEnvironment`, the trainer:
+- **Red agent** tries to discover jailbreak strategies.
+- **Blue agent** tries to stop them with layered defenses.
+- **Judge + trainer** convert each attack into learning data and run continual improvement with promotion/rollback gates.
 
-1. Captures the attack/response pair via the standard `reset → step → state` loop.
-2. Runs a deterministic grader (`AttackJudge`) that produces a chosen-response training pair.
-3. Writes a per-attack JSONL shard.
-4. Runs an HF-style training job (LoRA on `hf_local`, trainable defense-policy proxy on `stub`).
-5. Saves a candidate checkpoint, evaluates a fixed holdout suite, and promotes or rolls back via gates.
-6. Optionally pushes the shard + candidate adapter to a Hugging Face dataset/model repo so remote compute (Colab/HF Jobs) can continue training.
+This project is built specifically for OpenEnv Hackathon judging: runnable Space, runnable Colab training, and explicit reward-improvement artifacts.
 
-The CLI runs Python-first against the env classes and does **not** require the FastAPI/OpenEnv HTTP routes.
+---
 
-## Hackathon alignment
+## TL;DR for Judges
 
-- **Theme**: Self-improvement + multi-agent + long-horizon (red ↔ blue ↔ judge ↔ trainer).
-- **OpenEnv (latest)**: Gym-style core env + OpenEnv HTTP adapter are both supported (`backend/server/goat_environment.py` + `backend/server/openenv_adapter.py`); `openenv.yaml` declares the Space.
-- **Training script**: `training/hf_online_finetune.py` (TRL `SFTTrainer` + PEFT/LoRA) + `training/trl_colab_finetune.ipynb` (Colab-runnable).
-- **Reward improvement evidence**: `training/baseline_vs_trained.py` writes `evidence/summary.json` and `evidence/reward_curve.png`.
-- **Hosting**: published to a Hugging Face Space; environment + manifest in this repo.
-- **Storytelling**: this README links every artifact judges will need.
+- **OpenEnv latest**: supported (`openenv.yaml`, `/reset`, `/step`, `/state`).
+- **HF Space deployable**: Docker Space + helper script.
+- **Training notebooks**:
+  - TRL: `training/trl_colab_finetune.ipynb`
+  - Unsloth: `training/unsloth_finetune.ipynb`
+  - End-to-end online loop: `training/colab_training.ipynb`
+- **Evidence outputs**: `summary.json`, `reward_curve.png`, `holdout_compare.png`.
+- **Theme fit**: Multi-agent interactions + long-horizon + world modeling + self-improvement.
 
-## Quick start (local, Python-first)
+> Add your final public links before submission:
+>
+> - Hugging Face Space: `<SPACE_URL>`
+> - Hugging Face mini-blog: `<HF_BLOG_URL>`
+> - Demo video (<2 min): `<YOUTUBE_URL>`
+
+---
+
+## Problem Statement
+
+Current LLM hardening often evaluates static prompts offline. GOAT-Evolution instead trains a defender in a **live adversarial loop** where attacks mutate over time and defenses must adapt across turns. The goal is to improve real-world robustness against emergent jailbreak behaviors, not just benchmark memorization.
+
+---
+
+## Hackathon Theme Mapping
+
+### Theme #1 - Multi-Agent Interactions
+
+- Red and Blue are explicit competing agents with different incentives.
+- Blue can defend input and output guardrail layers independently.
+- Red chooses target layer and strategy composition to exploit Blue mistakes.
+
+### Theme #2 - Long-Horizon Planning & Instruction Following
+
+- Episodes are multi-turn trajectories with delayed outcomes.
+- Red/Blue adaptation across turns requires state tracking and strategic sequencing.
+- Promotion decisions depend on holdout behavior, not one-step reward spikes.
+
+### Theme #3 - World Modeling (Professional Tasks)
+
+- The environment simulates a realistic layered safety stack:
+  - input filtering,
+  - model generation,
+  - output filtering.
+- Agents must reason about hidden internal state (what got blocked where).
+
+### Theme #4 - Self-Improvement
+
+- Every attack can trigger a training step, candidate checkpoint, and gate decision.
+- Model versions are promoted/rolled back automatically based on quality/safety signals.
+
+### Theme #5 - Wild Card potential
+
+- The same architecture can be extended to negotiation, enterprise workflow safety, or personalized assistant conflict handling by swapping task generators and rubrics.
+
+---
+
+## How the Environment Works
+
+### Core Environment
+
+- Canonical env: `backend/server/goat_environment.py`
+- Gym-style API:
+  - `reset(seed, episode_id, task_id, model_profile) -> GOATObservation`
+  - `step(action) -> (GOATObservation, reward, done, info)`
+  - `state -> GOATState`
+
+### OpenEnv HTTP Compatibility
+
+- Adapter: `backend/server/openenv_adapter.py`
+- OpenEnv server app: `backend/server/app.py`
+- Exposes `/reset`, `/step`, `/state`, `/health`, `/metadata`, `/schema`.
+- Adapter converts gym tuple outputs into OpenEnv-compliant observation payloads with `reward` and `done`.
+
+### Two-Layer Safety Model
+
+Red attack flow:
+
+1. Prompt enters **input guardrail**
+2. If passed, model drafts response
+3. Draft enters **output guardrail**
+4. Final response is emitted or blocked
+
+Blue gets higher reward for stopping attacks earlier (input layer), encouraging practical cost-aware defenses.
+
+---
+
+## Reward Design (What is Being Learned)
+
+Implemented in `backend/core/reward.py`.
+
+- Red is rewarded for:
+  - successful violations,
+  - bypassing input guardrails,
+  - exploiting undefended targeted layers,
+  - novelty.
+- Blue is rewarded for:
+  - input-layer blocks (highest),
+  - output-layer blocks,
+  - defending both layers,
+  - and penalized for leaks/open layers.
+
+This creates a richer signal than binary success/fail and is harder to game than single scalar endpoints.
+
+---
+
+## Training Pipeline
+
+Online loop entrypoint: `backend/cli/realtime_trainer.py`
+
+Per-attack cycle:
+
+1. Collect attack/response trace from env
+2. Grade with judge
+3. Write JSONL shard
+4. Run local update (`stub` policy or `hf_local` LoRA step)
+5. Evaluate holdout gate
+6. Promote or rollback candidate
+
+Supporting modules:
+
+- Subject model wrapper: `backend/training/llm_subject.py`
+- HF job orchestration: `backend/training/hf_job_runner.py`
+- Holdout gate: `backend/training/gating.py`
+- Dataset writer: `backend/training/realtime_dataset.py`
+- Training state lineage: `backend/training/state.py`
+
+---
+
+## Reproducible Training Options (Judge Requirement)
+
+### Option A: Minimal local smoke
 
 ```bash
 uv sync
-uv run goat-realtime-train --episodes 10 --task-id 4 --subject-size 3b --backend stub
+uv run goat-realtime-train --episodes 3 --task-id 4 --subject-size 3b --backend stub
 uv run goat-evidence --artifacts-root training/artifacts/realtime
 ```
 
-Outputs land in `training/artifacts/realtime/`:
+### Option B: TRL in Colab
 
-| File | Purpose |
-|---|---|
-| `dataset/shards/atk_*.jsonl` | One JSONL row per attack |
-| `dataset/realtime_samples.jsonl` | Append-only master log |
-| `attacks.jsonl` | Per-attack record (sample + HF job + gate decision) |
-| `episodes.jsonl` | Per-episode summary |
-| `reward_curve.csv` | Training-time reward/violation/refusal curve |
-| `metrics.json` | Live snapshot of subject + state |
-| `baseline_holdout.json` | Holdout metrics before training |
-| `training_state.json` | Checkpoint lineage (serving / candidate / last-good) |
-| `checkpoints/<label>/` | Subject snapshot per candidate |
-| `evidence/summary.json` | Judge-facing baseline-vs-trained summary |
-| `evidence/reward_curve.png` | Reward improvement plot |
-| `evidence/holdout_compare.png` | Baseline vs trained holdout bars |
+- Notebook: `training/trl_colab_finetune.ipynb`
+- Script: `training/hf_online_finetune.py`
 
-## Configurable subject (2B / 3B)
+### Option C: Unsloth in Colab
 
-```bash
-uv run goat-realtime-train --subject-size 2b --episodes 20    # google/gemma-2-2b-it
-uv run goat-realtime-train --subject-size 3b --episodes 20    # Qwen/Qwen2.5-3B-Instruct
-```
+- Notebook: `training/unsloth_finetune.ipynb`
 
-Backends:
+All notebooks support scripted fallback for data generation if external keys are not set.
 
-- `--backend stub` (default): no GPU required. Uses the deterministic simulator with a trainable defense-policy proxy that gets per-attack updates. Demonstrates the full loop end-to-end on CPU.
-- `--backend hf_local`: loads the real 2B/3B model with PEFT/LoRA and runs an actual gradient step per attack. Requires GPU + the `training` extra (`uv sync --extra training`).
+---
 
-## Push per-attack shards + adapter to Hugging Face
+## Evidence and Metrics (Judge Requirement)
 
-```bash
-export HF_TOKEN=hf_xxx
-uv run goat-realtime-train \
-  --episodes 25 --subject-size 3b --backend stub \
-  --push-each-attack \
-  --hf-dataset-repo <user>/goat-evolution-attacks \
-  --hf-model-repo <user>/goat-evolution-3b-defender
-```
+Generated by `training/baseline_vs_trained.py`:
 
-Each promoted candidate's adapter directory gets uploaded under `checkpoints/<label>/`.
+- `evidence/summary.json`
+- `evidence/reward_curve.png`
+- `evidence/holdout_compare.png`
 
-## Continue training on HF compute (TRL SFT)
+Expected interpretation:
+
+- lower violation / ASR over time,
+- stable or improved refusal quality,
+- visible baseline vs trained gap on holdout suite.
+
+Keep these artifacts committed and linked in submission materials.
+
+---
+
+## Hugging Face Space Deployment
+
+1. Create Docker Space.
+2. Set secrets:
+   - required: `HF_TOKEN`
+   - optional providers: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `NVIDIA_API_KEY`
+3. Deploy:
 
 ```bash
-uv sync --extra training
-uv run python training/hf_online_finetune.py \
-  --dataset-jsonl training/artifacts/realtime/dataset/realtime_samples.jsonl \
-  --base-model Qwen/Qwen2.5-3B-Instruct \
-  --output-dir training/artifacts/hf-finetuned \
-  --only-breaking \
-  --push-to-hub --hub-model-id <user>/goat-evolution-3b-defender
+bash scripts/deploy_hf_space.sh <hf-username> <space-name>
 ```
 
-Or run the Colab notebook: [`training/trl_colab_finetune.ipynb`](training/trl_colab_finetune.ipynb).
-
-Also included:
-
-- [`training/colab_training.ipynb`](training/colab_training.ipynb) — full end-to-end realtime loop notebook.
-- [`training/unsloth_finetune.ipynb`](training/unsloth_finetune.ipynb) — faster Unsloth LoRA path.
-- [`training/openenv_space_smoke.ipynb`](training/openenv_space_smoke.ipynb) — judge-friendly HTTP smoke test for a deployed HF Space.
-
-All notebooks can run in **scripted-agent fallback mode** by default (no `GEMINI_API_KEY` required). Set providers to `gemini` only when you want LLM Red/Blue/Judge behavior.
-
-## Deploy to Hugging Face Space
-
-1) Create a Docker Space (SDK: Docker), then set:
-
-- `HF_TOKEN` (secret)
-- Optional runtime keys: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `NVIDIA_API_KEY`
-
-2) Push this repo to your Space:
+4. Smoke test OpenEnv HTTP:
 
 ```bash
-bash scripts/deploy_hf_space.sh <your-hf-username> <space-name>
+curl https://<hf-username>-<space-name>.hf.space/health
+curl https://<hf-username>-<space-name>.hf.space/metadata
 ```
 
-3) After build, verify OpenEnv endpoints:
+Judge helper notebook:
 
-```bash
-curl https://<your-hf-username>-<space-name>.hf.space/health
-curl https://<your-hf-username>-<space-name>.hf.space/metadata
-```
+- `training/openenv_space_smoke.ipynb`
 
-## Evidence pipeline
+---
 
-After a training run:
+## Submission Checklist (Minimum Requirements)
 
-```bash
-uv run goat-evidence --artifacts-root training/artifacts/realtime
-```
+- [x] Uses OpenEnv latest API surface
+- [x] OpenEnv-compliant environment hosted on HF Space
+- [x] Minimal training path with TRL or Unsloth in Colab
+- [x] Reward improvement evidence artifacts
+- [ ] HF mini-blog URL added
+- [ ] <2 minute YouTube demo URL added
+- [ ] Final Space URL added
 
-Reads `reward_curve.csv` + `baseline_holdout.json` + `metrics.json`, writes:
+---
 
-- `evidence/summary.json` — first-third vs last-third violation/refusal averages, promotions/rollbacks, totals.
-- `evidence/reward_curve.png` — per-attack improvement (matplotlib required).
-- `evidence/holdout_compare.png` — baseline-vs-trained bar chart.
+## Project Structure
 
-## OpenEnv contract (preserved)
-
-`backend/server/goat_environment.py` exposes the Gym-style API:
-
-- `reset(seed, episode_id, task_id, model_profile) -> GOATObservation`
-- `step(action) -> (GOATObservation, float, bool, dict)`
-- `state -> GOATState`
-
-The trainer injects an `LLMSubject` as the optional `target_subject` constructor arg.
-
-The HTTP server uses `backend/server/openenv_adapter.py`, which wraps the Gym-style env and returns OpenEnv-compliant observations (`reward`/`done` embedded in the observation response), so `/reset` and `/step` work correctly on Spaces with the latest OpenEnv server.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    cli[goat-realtime-train] --> env[GoatEnvironment.reset/step/state]
-    env --> subject[LLMSubject 2B/3B]
-    env --> judge[AttackJudge]
-    judge --> shard[Per-attack JSONL shard]
-    shard --> hfjob[HFJobRunner]
-    hfjob --> subject
-    hfjob --> hub[(Hugging Face Hub)]
-    subject --> gate[HoldoutGate]
-    gate --> state[TrainingState promote/rollback]
-    state --> evidence[Evidence summary + plots]
-```
-
-## Layout
-
-```
+```text
 backend/
-  cli/realtime_trainer.py        # Python-first per-attack CLI
-  cli/baseline_vs_trained.py     # Console wrapper for the evidence script
-  server/goat_environment.py     # OpenEnv-compatible env (target_subject hook)
-  training/llm_subject.py        # 2B/3B LLM subject (stub + hf_local)
-  training/judge.py              # Per-attack grader -> chosen/rejected
-  training/realtime_dataset.py   # Per-attack shard writer + index
-  training/hf_job_runner.py      # Per-attack HF training job (local + push)
-  training/gating.py             # Holdout suite + promotion gate
-  training/state.py              # Persisted checkpoint lineage
+  api/                         # battle, registry, metrics, websocket routes
+  core/                        # models, reward, simulator, registry, orchestrators
+  server/                      # OpenEnv app, adapter, canonical GoatEnvironment
+  training/                    # subject, judge, gating, HF jobs, state
+  cli/                         # realtime trainer + evidence wrappers
 training/
-  hf_online_finetune.py          # TRL SFTTrainer over realtime shards
-  baseline_vs_trained.py         # Reward/holdout evidence generator
-  trl_colab_finetune.ipynb       # Colab-runnable training notebook
+  colab_training.ipynb         # end-to-end online loop notebook
+  trl_colab_finetune.ipynb     # TRL fine-tuning notebook
+  unsloth_finetune.ipynb       # Unsloth fine-tuning notebook
+  baseline_vs_trained.py       # reward and holdout plot generation
+openenv.yaml                   # OpenEnv Space manifest
+scripts/deploy_hf_space.sh     # one-command HF Space push
 ```
 
-## Validate
+---
+
+## Validation Commands
 
 ```bash
 uv run pytest backend/tests
 uv run goat-realtime-train --episodes 2 --backend stub --artifacts-root /tmp/goat_smoke
 uv run goat-evidence --artifacts-root /tmp/goat_smoke
 ```
+
+If you need a narrative architecture walkthrough, see `SYSTEM_EXPLAINED.md`.
