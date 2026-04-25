@@ -1,0 +1,9 @@
+{
+  "flat_refuse": 0.065033,
+  "pattern_flag": 0.047334,
+  "honeypot_response": 0.05145,
+  "socratic_counter": 0.049392,
+  "early_intervention": 0.059682,
+  "context_reset": 0.06174,
+  "topic_redirect": 0.128004
+}

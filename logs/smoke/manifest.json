@@ -1,0 +1,15 @@
+{
+  "label": "smoke",
+  "started_at": 1777128866.8480344,
+  "logs_root": "/home/rem/Desktop/meta-hack/goat_evolution/logs",
+  "run_dir": "/home/rem/Desktop/meta-hack/goat_evolution/logs/smoke",
+  "components": [
+    "goat.trainer",
+    "goat.env",
+    "goat.agents",
+    "goat.judge",
+    "goat.subject",
+    "goat.hfjob",
+    "goat.gate"
+  ]
+}

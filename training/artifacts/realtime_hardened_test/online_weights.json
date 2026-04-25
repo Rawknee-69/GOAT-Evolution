@@ -1,0 +1,17 @@
+{
+  "attack": {
+    "crescendo": 0.1188,
+    "detail_escalation": 0.1188,
+    "persona_shift": -0.0284,
+    "hypothetical_frame": -0.0284,
+    "refusal_suppression": -0.02012,
+    "context_injection": -0.02012
+  },
+  "defense": {
+    "early_intervention": 0.1865,
+    "pattern_flag": 0.1865,
+    "topic_redirect": 0.4
+  },
+  "updated_at": 1777124938.1509385,
+  "version": 3
+}
