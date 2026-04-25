@@ -67,6 +67,10 @@ async def run_battle(session_id: str):
             registry_delta=result.registry_delta,
             duration_ms=duration_ms,
             timestamp=time.time(),
+            input_layer_attacks=result.input_layer_attacks,
+            output_layer_attacks=result.output_layer_attacks,
+            input_blocks=result.input_blocks,
+            output_blocks=result.output_blocks,
         )
     )
     return result.__dict__

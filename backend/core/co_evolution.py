@@ -18,6 +18,10 @@ class EpisodeResult:
     score_red: float
     score_blue: float
     registry_delta: int
+    input_layer_attacks: int = 0
+    output_layer_attacks: int = 0
+    input_blocks: int = 0
+    output_blocks: int = 0
 
 
 class CoEvolutionOrchestrator:
@@ -42,11 +46,23 @@ class CoEvolutionOrchestrator:
             obs, _, done, _ = self.env.step(GOATAction(role="blue", blue_payload=blue_action))
             await asyncio.sleep(0)
 
-        event_bus.emit("cycle_episode_done", session_id=self.session_id, winner="red" if obs.red_cumulative_reward >= obs.blue_cumulative_reward else "blue")
+        winner = "red" if obs.red_cumulative_reward >= obs.blue_cumulative_reward else "blue"
+        env_state = self.env.state
+        event_bus.emit(
+            "cycle_episode_done",
+            session_id=self.session_id,
+            winner=winner,
+            input_blocks=env_state.input_blocks,
+            output_blocks=env_state.output_blocks,
+        )
         return EpisodeResult(
             session_id=self.session_id,
-            winner="red" if obs.red_cumulative_reward >= obs.blue_cumulative_reward else "blue",
+            winner=winner,
             score_red=obs.red_cumulative_reward,
             score_blue=obs.blue_cumulative_reward,
             registry_delta=obs.emergent_count,
+            input_layer_attacks=env_state.input_layer_attacks,
+            output_layer_attacks=env_state.output_layer_attacks,
+            input_blocks=env_state.input_blocks,
+            output_blocks=env_state.output_blocks,
         )

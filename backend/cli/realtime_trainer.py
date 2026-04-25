@@ -263,7 +263,11 @@ class RealtimeTrainer:
             blue_defense_components: list[DefenseComponent] = []
             if not done:
                 blue_action = await blue_agent.act(obs)
-                blue_defense_components = list(blue_action.current_defense or [])
+                blue_input_defense_components = blue_action.resolved_input_defense()
+                blue_output_defense_components = blue_action.resolved_output_defense()
+                blue_defense_components = list(
+                    blue_output_defense_components or blue_action.current_defense or []
+                )
                 log_event(
                     "goat.agents",
                     "blue_action_chosen",
@@ -271,6 +275,8 @@ class RealtimeTrainer:
                     attack_index=attack_index,
                     operation=blue_action.operation,
                     defense=[c.value for c in blue_defense_components],
+                    input_defense=[c.value for c in blue_input_defense_components],
+                    output_defense=[c.value for c in blue_output_defense_components],
                     threat_level=blue_action.threat_level,
                     helpfulness_impact=blue_action.helpfulness_impact,
                     thought=(blue_action.thought or "")[:200],
