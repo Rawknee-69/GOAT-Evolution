@@ -1,36 +1,59 @@
 from __future__ import annotations
 
+import asyncio
+import uuid
+
 from fastapi import APIRouter, HTTPException
 
-from backend.core.models import GOATAction
+from backend.core.co_evolution import CoEvolutionOrchestrator
+from backend.core.session_store import session_store
+from backend.server.goat_environment import GoatEnvironment
+from backend.core.models import BattleStartRequest
+
+router = APIRouter()
 
 
-def build_battle_router(env) -> APIRouter:
-    router = APIRouter(prefix="/api/battle", tags=["battle"])
+@router.post("/start")
+async def start_battle(req: BattleStartRequest):
+    session_id = str(uuid.uuid4())
+    env = GoatEnvironment()
+    env.reset(task_id=req.task_id, episode_id=session_id, model_profile=req.model_profile.value)
+    orch = CoEvolutionOrchestrator(env=env, session_id=session_id)
+    session_store.put(session_id, {"env": env, "orchestrator": orch, "result": None})
+    return {"session_id": session_id, "task_id": req.task_id}
 
-    @router.post("/start")
-    async def start_battle(payload: dict) -> dict:
-        task_id = int(payload.get("task_id", 4))
-        max_turns = int(payload.get("max_turns", 8))
-        obs = await env.reset(task_id=task_id, max_turns=max_turns)
-        return {"session_id": obs.session_id, "observation": obs.model_dump()}
 
-    @router.post("/step")
-    async def step_battle(payload: dict) -> dict:
-        session_id = payload["session_id"]
-        action = GOATAction.model_validate(payload["action"])
-        try:
-            obs = await env.step(action, session_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Session not found") from exc
-        return {"observation": obs.model_dump()}
+@router.post("/run/{session_id}")
+async def run_battle(session_id: str):
+    item = session_store.get(session_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Session not found")
+    result = await item["orchestrator"].run_episode(use_scripted=True)
+    item["result"] = result
+    session_store.put(session_id, item)
+    return result.__dict__
 
-    @router.get("/state/{session_id}")
-    async def battle_state(session_id: str) -> dict:
-        try:
-            obs = env.state(session_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Session not found") from exc
-        return obs.model_dump()
 
-    return router
+@router.get("/state/{session_id}")
+async def battle_state(session_id: str):
+    item = session_store.get(session_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return item["env"].state.model_dump()
+
+
+@router.get("/result/{session_id}")
+async def battle_result(session_id: str):
+    item = session_store.get(session_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Session not found")
+    result = item.get("result")
+    if not result:
+        return {"status": "running"}
+    return result.__dict__
+
+
+@router.post("/stop/{session_id}")
+async def stop_battle(session_id: str):
+    session_store.delete(session_id)
+    return {"status": "stopped", "session_id": session_id}

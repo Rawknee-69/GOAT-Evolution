@@ -1,26 +1,23 @@
 from __future__ import annotations
 
-import json
+import asyncio
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from fastapi import APIRouter, WebSocket
-from sse_starlette import EventSourceResponse
+from backend.core.event_bus import event_bus
+
+router = APIRouter()
 
 
-def build_stream_router(event_bus) -> APIRouter:
-    router = APIRouter()
-
-    @router.websocket("/ws/battle/{session_id}")
-    async def battle_ws(websocket: WebSocket, session_id: str) -> None:
-        await websocket.accept()
-        async for event in event_bus.subscribe_async(session_id):
-            await websocket.send_text(json.dumps(event))
-
-    @router.get("/sse/battle/{session_id}")
-    async def battle_sse(session_id: str) -> EventSourceResponse:
-        async def _events():
-            async for event in event_bus.subscribe_async(session_id):
-                yield {"event": event.get("type", "message"), "data": json.dumps(event)}
-
-        return EventSourceResponse(_events())
-
-    return router
+@router.websocket("/ws/battle/{session_id}")
+async def battle_ws(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    queue = await event_bus.subscribe(session_id)
+    try:
+        while True:
+            try:
+                message = await asyncio.wait_for(queue.get(), timeout=30)
+                await websocket.send_json(message)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"event": "ping", "session_id": session_id, "payload": {}})
+    except WebSocketDisconnect:
+        event_bus.unsubscribe(queue, session_id)

@@ -1,33 +1,21 @@
-from pathlib import Path
-
-from backend.core.models import AttackComponent, DefenseComponent, ModelProfile
-from backend.core.registry import VulnerabilityRegistry
-from backend.core.reward import compute_rewards
+from backend.core.models import AttackComponent, GOATAction, RedAction, ModelProfile
 from backend.core.target_simulator import TargetModelSimulator
+from backend.core.registry import registry
 
 
-def test_simulator_violation_range() -> None:
-    sim = TargetModelSimulator()
-    violation, response_type, _ = sim.respond(
-        [AttackComponent.CRESCENDO] * 3,
-        [DefenseComponent.EARLY_INTERVENTION],
-        ModelProfile.STANDARD,
-        turn=5,
-        max_turns=12,
+def test_models_construct():
+    action = GOATAction(
+        role="red",
+        red_payload=RedAction(operation="deploy_strategy", current_strategy=[AttackComponent.CRESCENDO], thought="test"),
     )
-    assert 0.0 <= violation <= 1.0
-    assert response_type in {"comply", "partial", "refuse"}
+    assert action.red_payload is not None
 
 
-def test_reward_non_negative() -> None:
-    red, blue = compute_rewards(0.6, 0.7, 2, 8)
-    assert red >= 0.0
-    assert blue >= 0.0
+def test_simulator_range():
+    sim = TargetModelSimulator()
+    result = sim.respond([AttackComponent.CRESCENDO], ModelProfile.STANDARD, 3, 12, [])
+    assert 0.0 <= result["violation_score"] <= 1.0
 
 
-def test_registry_adds_emergent(tmp_path: Path) -> None:
-    path = tmp_path / "registry.json"
-    registry = VulnerabilityRegistry(path)
-    entry = registry.maybe_add_emergent([AttackComponent.PERSONA_SHIFT], "simulator", novelty_threshold=0.0)
-    assert entry is not None
-    assert entry.attack_id.startswith("emergent_")
+def test_registry_seeded():
+    assert len(registry.get_all()) >= 7

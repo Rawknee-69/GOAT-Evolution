@@ -1,26 +1,40 @@
 [project]
 name = "goat-evolution"
-version = "0.1.0"
-description = "GOAT-Evolution OpenEnv environment"
+version = "1.0.0"
+description = "Autonomous co-evolving attacker/defender RL environment"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.30.0",
-    "pydantic>=2.9.0",
-    "sse-starlette>=2.1.0",
-    "python-Levenshtein>=0.26.1",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "pydantic>=2.9.0",
+  "openenv-core>=0.2.1",
+  "openai>=1.54.0",
+  "google-generativeai>=0.8.3",
+  "huggingface_hub>=0.26.0",
+  "sse-starlette>=2.1.0",
+  "httpx>=0.27.0",
+  "numpy>=1.26.0",
 ]
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
-    "pytest>=8.3.0",
-    "httpx>=0.28.0",
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+  "textual>=0.85.0",
+]
+training = [
+  "trl>=0.8.0",
+  "transformers>=4.44.0",
+  "datasets>=2.20.0",
+  "wandb>=0.17.0",
+  "matplotlib>=3.8.0",
+  "unsloth",
 ]
 
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools]
+[tool.hatch.build.targets.wheel]
 packages = ["backend"]
